@@ -255,7 +255,8 @@ function Dashboard(props) {
       setProgress(0);
       notify("danger", `Image processing failed for ${uploadedImage.name}.`);
     } finally {
-      setTimeout(() => setIsProcessing(false), 5000);
+      // setTimeout(() => setIsProcessing(false), 5000);
+      setTimeout(()=> setIsProcessing(false));
     }
   };
 
