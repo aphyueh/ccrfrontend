@@ -31,29 +31,28 @@ import {
   backgroundColors,
 } from "contexts/BackgroundColorContext";
 
-var ps;
-
 function Sidebar(props) {
   const location = useLocation();
   const sidebarRef = React.useRef(null);
+  const scrollbarRef = React.useRef(null);
   // verifies if routeName is the one active (in browser input)
   const activeRoute = (routeName) => {
     return location.pathname === routeName ? "active" : "";
   };
   React.useEffect(() => {
-    if (navigator.platform.indexOf("Win") > -1) {
-      ps = new PerfectScrollbar(sidebarRef.current, {
+    if (navigator.platform.indexOf("Win") > -1 && sidebarRef.current) {
+      scrollbarRef.current = new PerfectScrollbar(sidebarRef.current, {
         suppressScrollX: true,
         suppressScrollY: false,
       });
     }
-    // Specify how to clean up after this effect:
     return function cleanup() {
-      if (navigator.platform.indexOf("Win") > -1) {
-        ps.destroy();
+      if (scrollbarRef.current) {
+        scrollbarRef.current.destroy();
+        scrollbarRef.current = null;
       }
     };
-  });
+  }, []);
   const linkOnClick = () => {
     document.documentElement.classList.remove("nav-open");
   };
@@ -67,6 +66,7 @@ function Sidebar(props) {
           href={logo.outterLink}
           className="simple-text logo-mini"
           target="_blank"
+          rel="noreferrer"
           onClick={props.toggleSidebar}
         >
           <div className="logo-img">
@@ -79,6 +79,7 @@ function Sidebar(props) {
           href={logo.outterLink}
           className="simple-text logo-normal"
           target="_blank"
+          rel="noreferrer"
           onClick={props.toggleSidebar}
         >
           {logo.text}

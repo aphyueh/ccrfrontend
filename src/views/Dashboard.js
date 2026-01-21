@@ -17,10 +17,12 @@
 */
 import axios from "axios";
 import classNames from "classnames";
-import React , { useState , useEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Line, Bar } from "react-chartjs-2";
-import NotificationAlert from "react-notification-alert";
 import Settings from "./Settings";
+import sampleOrange from "assets/img/sample_orange.jpg";
+import sampleGreen from "assets/img/sample_green.jpg";
+import sampleYellow from "assets/img/sample_yellow.jpg";
 
 // reactstrap components
 import {
@@ -75,26 +77,6 @@ function Dashboard(props) {
   //     return updated.slice(-10); // Keep max 10 latest
   //   });
   // };  
-  useEffect(() => {
-    const initialize = async () => {
-      notify("info", "Cleaning up previous files...");
-      notify("info", "Loading Color Cast Removal Model...");
-      // 1. Trigger cleanup
-      fetch(`${backendUrl}/api/cleanup`, { method: 'POST' })
-      .then(res => res.json())
-      .then(data => console.log("Cleanup response:", data))
-      .catch(err => console.error("Cleanup error:", err));
-      notify("success", "Cleanup complete.");
-
-      // 2. Trigger model initialization
-      fetch(`${backendUrl}/api/init_model`, { method: 'POST' })
-        .then(res => res.json())
-        .then(data => console.log("Init model response:", data))
-        .catch(err => console.error("Init model error:", err));
-      notify("success", "Model initialization complete.")
-    };
-    initialize();
-  }, [backendUrl]); // Runs only once on page load/refresh
 
   const [progress, setProgress] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -117,12 +99,139 @@ function Dashboard(props) {
   });
   const [adjustedImageUrl, setAdjustedImageUrl] = useState(null);
   const [hasAdjusted, setHasAdjusted] = useState(false);
+  const hasInitializedRef = useRef(false);
+
+  // UPLOAD
+  const handleImageUpload = useCallback((event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setUploadedImage(file); // Save file for later processing
+      const localUrl = URL.createObjectURL(file);
+      setUploadedImageUrl(localUrl);
+
+      // Clear previous output & adjustments
+      setProcessedImageUrl(null);
+      setAdjustedImageUrl(null);
+      setHasAdjusted(false);
+      setViewMode("processed");
+      setAdjustParams({ brightness: 0, contrast: 0, saturation: 0, temperature: 0 });
+      setProgress(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (uploadedImageUrl) {
+        URL.revokeObjectURL(uploadedImageUrl);
+      }
+    };
+  }, [uploadedImageUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (processedImageUrl) {
+        URL.revokeObjectURL(processedImageUrl);
+      }
+    };
+  }, [processedImageUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (adjustedImageUrl) {
+        URL.revokeObjectURL(adjustedImageUrl);
+      }
+    };
+  }, [adjustedImageUrl]);
+
+  // --- NEW: Function to load a sample image when clicked ---
+  const loadSample = async (imageSource, filename) => {
+    try {
+      notify("info", `Loading sample: ${filename}...`);
+      const response = await fetch(imageSource);
+      const blob = await response.blob();
+      const file = new File([blob], filename, { type: blob.type });
+      
+      // Reuse your existing upload logic
+      handleImageUpload({ target: { files: [file] } });
+    } catch (error) {
+      console.error("Error loading sample:", error);
+      notify("danger", "Failed to load sample image.");
+    }
+  };
+
+  const handleSampleKeyDown = (e, imageSource, filename) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      loadSample(imageSource, filename);
+    }
+  };
+
+  // --- NEW: Global Paste Listener (Ctrl+V) ---
+  useEffect(() => {
+    const handlePaste = (e) => {
+      // Only handle paste if we don't already have an image (optional check)
+      if (e.clipboardData && e.clipboardData.items) {
+        const items = e.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf("image") !== -1) {
+            e.preventDefault(); // Stop browser from doing default paste
+            const file = items[i].getAsFile();
+            notify("info", "Image detected from clipboard!");
+            handleImageUpload({ target: { files: [file] } });
+            break; 
+          }
+        }
+      }
+    };
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [handleImageUpload, notify]);
+
+  useEffect(() => {
+    const initialize = async () => {
+      if (!backendUrl) {
+        notify("danger", "Backend URL is not configured.");
+        return;
+      }
+
+      if (hasInitializedRef.current) {
+        return;
+      }
+      hasInitializedRef.current = true;
+
+      const postJson = async (url) => {
+        const res = await fetch(url, { method: "POST" });
+        if (!res.ok) {
+          throw new Error(`Request failed: ${res.status}`);
+        }
+        try {
+          return await res.json();
+        } catch {
+          return {};
+        }
+      };
+
+      try {
+        notify("info", "Cleaning up previous files...");
+        await postJson(`${backendUrl}/api/cleanup`);
+        notify("success", "Cleanup complete.");
+
+        notify("info", "Loading Color Cast Removal Model...");
+        await postJson(`${backendUrl}/api/init_model`);
+        notify("success", "Model initialization complete.");
+      } catch (error) {
+        console.error("Initialization error:", error);
+        notify("danger", "Initialization failed. Please try again.");
+      }
+    };
+    initialize();
+  }, [backendUrl, notify]); // Runs only once on page load/refresh
   
   const handleAdjustChange = async (param, value) => {
     const newParams = { ...adjustParams, [param]: value };
     setAdjustParams(newParams);
     
-    if (!uploadedImage) return;
+    if (!uploadedImage || !processedBlob) return;
     if (!hasAdjusted) setHasAdjusted(true);
     
     const formData = new FormData();
@@ -155,22 +264,7 @@ function Dashboard(props) {
   
   
   // UPLOAD
-  const handleImageUpload = async (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setUploadedImage(file); // Save file for later processing
-      const localUrl = URL.createObjectURL(file);
-      setUploadedImageUrl(localUrl);
-
-      // Clear previous output & adjustments
-      setProcessedImageUrl(null);
-      setAdjustedImageUrl(null);
-      setHasAdjusted(false);
-      setViewMode("processed");
-      setAdjustParams({ brightness: 0, contrast: 0, saturation: 0, temperature: 0 });
-      setProgress(0);
-    }
-  };
+  
   const handleDragOver = (e) => {
     e.preventDefault();
   };
@@ -181,7 +275,7 @@ function Dashboard(props) {
 
   // PROCESS
   const handleProcessImage = async () => {
-    if (!uploadedImage) return;
+    if (!uploadedImage || isProcessing) return;
 
     if (imageHistory.length >= 10) {
       notify("danger", "Image upload limit reached (max 10 images).");
@@ -304,9 +398,82 @@ function Dashboard(props) {
     },
   };
 
+  const progressStatus = isProcessing
+    ? "Processing..."
+    : progress === 100
+    ? "Completed"
+    : "";
+
   return (
     <>
       <div className="content">
+        {/* ================= PASTE THE NEW CODE HERE ================= */}
+      {/* This Row contains the Sample Images Gallery */}
+      <Row>
+        <Col xs="12">
+          <Card>
+            <CardHeader>
+              <CardTitle tag="h3">Try with Sample Images</CardTitle>
+              <p className="category">Click an image below to load it instantly, or Copy & Paste (Ctrl+V) it into the upload box.</p>
+            </CardHeader>
+            <CardBody>
+              <Row>
+                {/* Orange Cast Sample */}
+                <Col md="4" className="text-center mb-3">
+                  <div 
+                    style={{ cursor: "pointer", border: "2px solid #e14eca", borderRadius: "8px", overflow: "hidden" }}
+                    onClick={() => loadSample(sampleOrange, "sample_orange.jpg")}
+                    onKeyDown={(e) => handleSampleKeyDown(e, sampleOrange, "sample_orange.jpg")}
+                    role="button"
+                    tabIndex={0}
+                    title="Click to process this image"
+                  >
+                    <img src={sampleOrange} alt="Orange Cast" style={{ width: "100%", height: "200px", objectFit: "cover" }} />
+                    <Button color="primary" size="sm" className="btn-simple mt-2 mb-2">
+                      Load Orange Cast
+                    </Button>
+                  </div>
+                </Col>
+
+                {/* Green Cast Sample */}
+                <Col md="4" className="text-center mb-3">
+                  <div 
+                    style={{ cursor: "pointer", border: "2px solid #00f2c3", borderRadius: "8px", overflow: "hidden" }}
+                    onClick={() => loadSample(sampleGreen, "sample_green.jpg")}
+                    onKeyDown={(e) => handleSampleKeyDown(e, sampleGreen, "sample_green.jpg")}
+                    role="button"
+                    tabIndex={0}
+                    title="Click to process this image"
+                  >
+                    <img src={sampleGreen} alt="Green Cast" style={{ width: "100%", height: "200px", objectFit: "cover" }} />
+                    <Button color="success" size="sm" className="btn-simple mt-2 mb-2">
+                        Load Green Cast
+                    </Button>
+                  </div>
+                </Col>
+
+                {/* Yellow Cast Sample */}
+                <Col md="4" className="text-center mb-3">
+                  <div 
+                    style={{ cursor: "pointer", border: "2px solid #ffdc5d", borderRadius: "8px", overflow: "hidden" }}
+                    onClick={() => loadSample(sampleYellow, "sample_yellow.jpg")}
+                    onKeyDown={(e) => handleSampleKeyDown(e, sampleYellow, "sample_yellow.jpg")}
+                    role="button"
+                    tabIndex={0}
+                    title="Click to process this image"
+                  >
+                    <img src={sampleYellow} alt="Yellow Cast" style={{ width: "100%", height: "200px", objectFit: "cover" }} />
+                    <Button color="warning" size="sm" className="btn-simple mt-2 mb-2">
+                        Load Yellow Cast
+                    </Button>
+                  </div>
+                </Col>
+              </Row>
+            </CardBody>
+          </Card>
+        </Col>
+      </Row>
+      {/* ================= END PASTE ================= */}
         <Row>
           <Col lg="4" md="12">
             <Card>
@@ -364,8 +531,13 @@ function Dashboard(props) {
                   Filename: <strong>{uploadedImage.name}</strong>
                 </div>
               )}
-              <Button onClick={handleProcessImage} color="primary" className="mt-3 w-100">
-                Process
+              <Button
+                onClick={handleProcessImage}
+                color="primary"
+                className="mt-3 w-100"
+                disabled={!uploadedImage || isProcessing}
+              >
+                {isProcessing ? "Processing..." : "Process"}
               </Button>
               </CardBody>
             </Card>
@@ -458,7 +630,9 @@ function Dashboard(props) {
                       ></div>
                     </div>
                     <div className="text-right">
-                      <small>{progress}%</small>
+                      <small>
+                        {progress}%{progressStatus ? ` • ${progressStatus}` : ""}
+                      </small>
                     </div>
                   </Col>
                 </Row>

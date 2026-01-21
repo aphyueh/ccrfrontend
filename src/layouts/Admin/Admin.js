@@ -34,48 +34,54 @@ import logo from "assets/img/react-logo.png";
 import { BackgroundColorContext } from "contexts/BackgroundColorContext";
 import NotificationAlert from "react-notification-alert"
 
-var ps;
-
 function Admin(props) {
   const location = useLocation();
   const mainPanelRef = React.useRef(null);
+  const mainScrollbarRef = React.useRef(null);
+  const tableScrollbarsRef = React.useRef([]);
   const [sidebarOpened, setsidebarOpened] = React.useState(
     document.documentElement.className.indexOf("nav-open") !== -1
   );
-  React.useEffect(() => {
+  const initTableScrollbars = React.useCallback(() => {
     if (navigator.platform.indexOf("Win") > -1) {
-      document.documentElement.className += " perfect-scrollbar-on";
+      tableScrollbarsRef.current.forEach((scrollbar) => scrollbar.destroy());
+      tableScrollbarsRef.current = [];
+      const tables = document.querySelectorAll(".table-responsive");
+      tableScrollbarsRef.current = Array.from(tables).map(
+        (table) => new PerfectScrollbar(table)
+      );
+    }
+  }, []);
+  React.useEffect(() => {
+    if (navigator.platform.indexOf("Win") > -1 && mainPanelRef.current) {
+      document.documentElement.classList.add("perfect-scrollbar-on");
       document.documentElement.classList.remove("perfect-scrollbar-off");
-      ps = new PerfectScrollbar(mainPanelRef.current, {
+      mainScrollbarRef.current = new PerfectScrollbar(mainPanelRef.current, {
         suppressScrollX: true,
       });
-      let tables = document.querySelectorAll(".table-responsive");
-      for (let i = 0; i < tables.length; i++) {
-        ps = new PerfectScrollbar(tables[i]);
-      }
+      initTableScrollbars();
     }
-    // Specify how to clean up after this effect:
     return function cleanup() {
+      if (mainScrollbarRef.current) {
+        mainScrollbarRef.current.destroy();
+        mainScrollbarRef.current = null;
+      }
+      tableScrollbarsRef.current.forEach((scrollbar) => scrollbar.destroy());
+      tableScrollbarsRef.current = [];
       if (navigator.platform.indexOf("Win") > -1) {
-        ps.destroy();
         document.documentElement.classList.add("perfect-scrollbar-off");
         document.documentElement.classList.remove("perfect-scrollbar-on");
       }
     };
-  });
+  }, [initTableScrollbars]);
   React.useEffect(() => {
-    if (navigator.platform.indexOf("Win") > -1) {
-      let tables = document.querySelectorAll(".table-responsive");
-      for (let i = 0; i < tables.length; i++) {
-        ps = new PerfectScrollbar(tables[i]);
-      }
-    }
+    initTableScrollbars();
     document.documentElement.scrollTop = 0;
     document.scrollingElement.scrollTop = 0;
     if (mainPanelRef.current) {
       mainPanelRef.current.scrollTop = 0;
     }
-  }, [location]);
+  }, [location, initTableScrollbars]);
   // this function opens and closes the sidebar on small devices
   const toggleSidebar = () => {
     document.documentElement.classList.toggle("nav-open");
